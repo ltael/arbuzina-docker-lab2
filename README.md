@@ -1,126 +1,154 @@
-# 🎓 Personal Assistant — учебный проект для практики Docker
+# Практическая работа №2. Знакомство с экосистемой Docker
 
-Простое FastAPI-приложение, которое используется как основа для лабораторной работы по Docker.
+**Студент:** Арбузина Елена Романовна, ИСУ 465038
+**Дисциплина:** Контейнеризация и оркестрация приложений
+**Исходное приложение:** [FilBTi/assist-py](https://github.com/FilBTi/assist-py) — FastAPI-сервис «Personal Assistant»
 
-## 📁 Структура проекта
+## Персональные параметры
+
+| Параметр | Значение |
+|---|---|
+| Номер ИСУ | 465038 |
+| Персональный порт | 5468 (5430 + 38) |
+| Персональный префикс | arbuzina |
+| Секретный ключ | secret38arbuzina |
+
+## Структура репозитория
 
 ```
-simple_example/
+.
 ├── app/
-│   └── main.py              # FastAPI-приложение
-├── requirements.txt          # Python-зависимости
+│   └── main.py              # код приложения (FastAPI)
+├── requirements.txt         # зависимости Python
+├── Dockerfile               # базовый Dockerfile (этап 1)
+├── Dockerfile.optimized     # multi-stage + healthcheck (этапы 2 и 4)
+├── .dockerignore            # исключения из контекста сборки (этап 3)
 └── README.md
 ```
 
-## 💻 Локальный запуск (без Docker)
+## Требования
 
-### 1. Установить зависимости
+- Linux (проверено на Ubuntu 24.04)
+- Docker Engine 28+ (проверено на клиенте 29.1.3 и сервере 28.2.2)
+- git, curl
 
-```bash
-cd simple_example
-pip install -r requirements.txt
-```
+## Воспроизведение
 
-### 2. Задать переменные окружения
-
-**macOS / Linux:**
+### 0. Клонирование
 
 ```bash
-export APP_OWNER=ВашеИмя
-export APP_SECRET=ваш_секретный_ключ
+git clone https://github.com/ltael/arbuzina-docker-lab2.git
+cd arbuzina-docker-lab2
 ```
 
-**Windows (PowerShell):**
-
-```powershell
-$env:APP_OWNER="ВашеИмя"
-$env:APP_SECRET="ваш_секретный_ключ"
-```
-
-**Windows (CMD):**
-
-```cmd
-set APP_OWNER=ВашеИмя
-set APP_SECRET=ваш_секретный_ключ
-```
-
-> Если не задать переменные, приложение запустится со значениями по умолчанию: `anonymous` / `default_secret`.
-
-### 3. Запустить сервер
+### 1. Базовый образ
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+docker build -t arbuzina-assistant:v1 .
+
+docker run -d \
+  --name arbuzina-assistant-1 \
+  -p 5468:5468 \
+  -e APP_OWNER=arbuzina \
+  -e APP_SECRET=secret38arbuzina \
+  arbuzina-assistant:v1
 ```
 
-Флаг `--reload` автоматически перезапускает сервер при изменении кода.
-
-### 4. Открыть в браузере
-
-- Приложение: **http://localhost:8000**
-- Swagger UI: **http://localhost:8000/docs**
-
-## 📡 Эндпоинты
-
-| Метод | URL | Описание |
-|-------|-----|----------|
-| GET | `/` | Главная страница — приветствие и список эндпоинтов |
-| GET | `/health` | Healthcheck — статус приложения |
-| GET | `/docs` | Swagger UI — интерактивная документация (встроена в FastAPI) |
-| GET | `/me` | Информация о владельце (из переменных окружения) |
-| GET | `/secret/{key}` | Проверка секретного ключа — убедитесь, что `APP_SECRET` пробрасывается |
-| GET | `/weather/{city}` | Текущая погода в городе через Open-Meteo API |
-| POST | `/notes` | Создать заметку (тело: `{"text": "..."}`) |
-| GET | `/notes` | Получить все заметки |
-
-### Примеры запросов
+Проверка:
 
 ```bash
-# Главная
-curl http://localhost:8000/
-
-# Погода в Москве
-curl http://localhost:8000/weather/Moscow
-
-# Проверка секретного ключа
-curl http://localhost:8000/secret/ваш_секретный_ключ
-
-# Создать заметку
-curl -X POST http://localhost:8000/notes \
+curl http://localhost:5468/ ; echo
+curl http://localhost:5468/me ; echo
+curl -X POST http://localhost:5468/notes \
   -H "Content-Type: application/json" \
-  -d '{"text": "Моя первая заметка"}'
-
-# Получить заметки
-curl http://localhost:8000/notes
+  -d '{"text": "ЛР2: сборка образа"}' ; echo
+curl http://localhost:5468/notes ; echo
+curl http://localhost:5468/secret/secret38arbuzina ; echo
 ```
 
-## 🔑 Переменные окружения
+Ожидаемый ответ последнего запроса: `{"flag":"LAB2_SUCCESS_ARBUZINA", ...}`.
 
-| Переменная | Описание | Значение по умолчанию |
-|------------|----------|-----------------------|
-| `APP_OWNER` | Имя владельца приложения | `anonymous` |
-| `APP_SECRET` | Секретный ключ для эндпоинта `/secret/{key}` | `default_secret` |
+Остановка перед следующими шагами (порт 5468 должен быть свободен):
 
+```bash
+docker stop arbuzina-assistant-1 && docker rm arbuzina-assistant-1
+```
 
-## 🌤 API погоды — важно для пользователей из РФ
+### 2. Оптимизированный образ (multi-stage)
 
-Эндпоинт `/weather/{city}` обращается к открытому API **[Open-Meteo](https://open-meteo.com/)** (бесплатный, без ключа):
+```bash
+docker build -t arbuzina-assistant:v2 -f Dockerfile.optimized .
+docker images arbuzina-assistant --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"
+```
 
-1. **Геокодинг** — `geocoding-api.open-meteo.com` — получает координаты города
-2. **Прогноз** — `api.open-meteo.com` — получает текущую погоду по координатам
+### 3. Сборка с .dockerignore
 
-### ⚠️ Блокировки РКН
+```bash
+docker build -t arbuzina-assistant:v3 .
 
-Домены `open-meteo.com` могут быть недоступны из российских сетей из-за блокировок РКН.
+# в v1 папка app/__pycache__ присутствует, в v3 — нет
+docker run --rm arbuzina-assistant:v1 ls -la /app/app
+docker run --rm arbuzina-assistant:v3 ls -la /app/app
+```
 
-Если эндпоинт `/weather/{city}` возвращает ошибку таймаута — **необходимо использовать средства обхода блокировок:**
+### 4. Финальный образ с healthcheck
 
-- **VPN** — включите VPN на машине, где запущен Docker
+```bash
+docker build -t arbuzina-assistant:final -f Dockerfile.optimized .
 
-## ✅ Как проверить, что всё работает
+docker run -d \
+  --name arbuzina-assistant-final \
+  -p 5468:5468 \
+  -e APP_OWNER=arbuzina \
+  -e APP_SECRET=secret38arbuzina \
+  arbuzina-assistant:final
 
-1. `curl http://localhost:8000/` — должен вернуть приветствие с вашим именем
-2. `curl http://localhost:8000/me` — должен показать `secret_prefix` (первые 6 символов вашего ключа)
-3. `curl http://localhost:8000/secret/ваш_ключ` — должен вернуть `LAB2_SUCCESS_ВАШЕИМЯ`
-4. `curl http://localhost:8000/weather/London` — должен вернуть температуру, влажность, ветер
-5. `docker inspect --format='{{.State.Health.Status}}' personal-assistant` — должен вернуть `healthy`
+sleep 10
+docker ps --filter "name=arbuzina-assistant-final" --format "table {{.Names}}\t{{.Status}}"
+```
 
+Ожидаемый статус: `Up ... (healthy)`. Журнал проверок:
+
+```bash
+docker inspect --format '{{json .State.Health}}' arbuzina-assistant-final | python3 -m json.tool
+```
+
+### 5. Теги и итоговый артефакт
+
+```bash
+docker tag arbuzina-assistant:final arbuzina-assistant:1.0.0
+docker tag arbuzina-assistant:final arbuzina-assistant:$(date +%Y%m%d)
+
+echo "========================================" && \
+echo "Сборка завершена: $(date '+%d.%m.%Y %H:%M:%S')" && \
+echo "Студент: $(whoami)@$(hostname)" && \
+echo "Образ: arbuzina-assistant" && \
+echo "========================================" && \
+docker images --format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}" | grep arbuzina-assistant | awk '{print $1, $2, $3}'
+```
+
+### Очистка
+
+```bash
+docker stop arbuzina-assistant-final && docker rm arbuzina-assistant-final
+docker rmi arbuzina-assistant:v1 arbuzina-assistant:v2 arbuzina-assistant:v3 \
+  arbuzina-assistant:final arbuzina-assistant:1.0.0 arbuzina-assistant:$(date +%Y%m%d)
+```
+
+## Результаты
+
+| Образ | Dockerfile | Размер | Особенности |
+|---|---|---|---|
+| v1 | Dockerfile | 188 MB | базовая сборка, кеш pip остаётся в слое |
+| v2 | Dockerfile.optimized (этап 2) | 164 MB | multi-stage, `--no-cache-dir`, non-root |
+| v3 | Dockerfile + .dockerignore | 188 MB | без `__pycache__` в образе |
+| final / 1.0.0 / дата | Dockerfile.optimized (этап 4) | 178 MB | + curl и HEALTHCHECK, статус `healthy` |
+
+Экономия v2 относительно v1: 24 MB (~13 %). Установка curl для healthcheck увеличила финальный образ на 14 MB.
+
+## Найденные проблемы и их решения
+
+1. **В `python:3.11-slim` нет curl**, поэтому HEALTHCHECK из задания всегда завершался бы ошибкой, и контейнер получал бы статус `unhealthy`. Решение: curl устанавливается в финальной стадии с `--no-install-recommends`, а кеш apt удаляется в том же слое `RUN`.
+2. **Шаблон `__pycache__/` в `.dockerignore` не исключал `app/__pycache__`.** В `.dockerignore` шаблоны без `**/` применяются только к корню контекста сборки. Первая сборка v3 дала образ, идентичный v1 (тот же ID). Решение: добавлены рекурсивные шаблоны `**/__pycache__`, `**/*.pyc`, `**/*.pyo`.
+3. **Команда из задания 5.2 с `awk '{print $1, $2, $7}'` не работает в Docker 29**: изменился формат вывода `docker images` (имя и тег объединены, колонка размера сместилась). Решение: используется явный формат `--format "table {{.Repository}}\t{{.Tag}}\t{{.Size}}"`.
+4. **Порядок слоёв**: на этапе 2 `RUN useradd` стоял после `COPY app/` и пересобирался при каждом изменении кода. В финальной версии установка curl и создание пользователя перенесены выше копирования кода.
