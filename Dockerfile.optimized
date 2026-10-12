@@ -9,8 +9,7 @@ WORKDIR /build
 COPY requirements.txt .
 
 # --no-cache-dir: pip не сохраняет скачанные пакеты в кеш
-# --prefix=/install: библиотеки ставятся в отдельную папку,
-# чтобы потом перенести только её в финальный образ
+# --prefix=/install: библиотеки ставятся в отдельную папку
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # ============================================
@@ -19,24 +18,35 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 FROM python:3.11-slim
 
 LABEL maintainer="arbuzina@lab.local"
-LABEL version="2.0"
+LABEL version="1.0.0"
 
-# Не создавать .pyc-файлы и не буферизовать вывод (логи сразу видны в docker logs)
+# Не создавать .pyc-файлы и не буферизовать вывод
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
+
+# curl для HEALTHCHECK + непривилегированный пользователь.
+# Кеш apt удаляется в том же слое. Стоит выше COPY app/,
+# так как не зависит от кода
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --no-create-home appuser
 
 WORKDIR /app
 
 # Переносим из builder только установленные библиотеки
 COPY --from=builder /install /usr/local
 
-# Копируем код приложения
+# Код копируем последним: он меняется чаще всего
 COPY app/ ./app/
 
-# Запуск не от root: создаём непривилегированного пользователя
-RUN useradd --system --no-create-home appuser
+# Запуск не от root
 USER appuser
 
 EXPOSE 5468
+
+# Проверка здоровья сервиса
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:5468/health || exit 1
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5468"]
